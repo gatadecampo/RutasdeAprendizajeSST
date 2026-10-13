@@ -341,11 +341,11 @@ def evaluar_cumplimiento(total_min, exigida_txt, solo_oal):
 # =============================================================================
 st.set_page_config(page_title="Generador de Rutas SST - Bukplay", layout="wide")
 
-st.title("Generador Universal de Rutas SST Bukplay 🇨🇱")
-st.markdown("Motor de **scoring ponderado con sinónimos SST**. Exporta 6 columnas estrictas.")
+st.title("Generador Rutas de Aprendizaje SST Bukplay CL")
+st.markdown("Motor de **scoring ponderado con sinónimos SST**")
 
 archivo_subido = st.file_uploader(
-    "1. Sube el catálogo consolidado de Bukplay (CSV o Excel)", type=["csv", "xlsx", "xls"]
+    "1. Sube el catálogo consolidado de SST (CSV o Excel)", type=["csv", "xlsx", "xls"]
 )
 
 
