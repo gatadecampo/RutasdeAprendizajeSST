@@ -5,35 +5,24 @@ import re
 import unicodedata
 
 # =============================================================================
-# 0. CONFIGURACIÓN DEL MOTOR (aquí se afina el comportamiento sin tocar la lógica)
+# 0. CONFIGURACIÓN DEL MOTOR
 # =============================================================================
-
-# Dónde se busca y cuánto vale un match según el campo del catálogo.
-# Un match en el Nombre del curso pesa 6 veces más que uno en el Público objetivo.
 CAMPOS_PESO = {
     "Nombre": 3.0,
     "Descripción": 2.0,
-    "Normativa": 1.0,        # aquí viven los nombres de protocolos (PREXOR, TMERT, PLANESI...)
+    "Normativa": 1.0,
     "Subcategoría": 0.5,
     "Público objetivo": 0.5,
 }
 
-# Fuerza del match de una palabra clave contra un campo (se multiplica por el peso del campo)
-FUERZA_FRASE_EXACTA = 1.00      # la frase aparece tal cual (ej: "partes móviles")
-FUERZA_TODAS_LAS_PALABRAS = 0.85  # están todas las palabras, en cualquier orden o por sinónimo
-FUERZA_PARCIAL = 0.40           # frases largas con cobertura parcial
+FUERZA_FRASE_EXACTA = 1.00
+FUERZA_TODAS_LAS_PALABRAS = 0.85
+FUERZA_PARCIAL = 0.40
 COBERTURA_MIN_PARCIAL = 0.60
 
-# Un curso entra a la ruta si:
-#   (a) su puntaje total >= umbral (ajustable en pantalla), Y
-#   (b) al menos UNA palabra clave pegó con fuerza razonable (evita que 5 matches
-#       débiles en 'Normativa' sumados cuelen un curso irrelevante).
-# Con estos valores entra un curso si una palabra clave aparece en su NOMBRE,
-# o si al menos dos aparecen en su DESCRIPCIÓN.
 UMBRAL_DEFECTO = 2.5
 PUNTAJE_MIN_UNA_FRASE = 1.7
 
-# Normas del selector -> (campo, patrón para FILTRAR, patrón para dar BONUS de orden)
 PATRONES_NORMA = {
     "Ley 16.744": ("Normativa", r"16\.?744", r"16\.?744"),
     "D.S. N°44": ("Normativa", r"\bn\s*[°º]?\s*44\b", r"\bn\s*[°º]?\s*44\b"),
@@ -44,14 +33,12 @@ PATRONES_NORMA = {
     "Industria: Minería": ("Industria", r"miner|transversal", r"miner"),
     "Industria: Construcción": ("Industria", r"construcc|transversal", r"construcc"),
 }
-BONUS_NORMA = 0.75  # solo ordena; nunca hace entrar a un curso por sí solo
-
+BONUS_NORMA = 0.75
 
 # =============================================================================
 # 1. LIMPIEZA Y TRANSFORMACIÓN
 # =============================================================================
 def normalizar_texto(texto):
-    """Minúsculas, sin tildes, solo letras/números. Elimina también '\\n' literales."""
     if texto is None or (not isinstance(texto, str) and pd.isna(texto)):
         return ""
     texto = str(texto).lower().replace("\\n", " ")
@@ -61,13 +48,11 @@ def normalizar_texto(texto):
 
 
 def raiz(palabra):
-    """Raíz liviana para español: quita plural y corta a 6 letras.
-    'herramientas'->'herram', 'psicosociales'->'psicos', 'cortes'->'corte'."""
     if len(palabra) > 3:
         if palabra.endswith("es") and palabra[-3] in "nlrdzsj":
-            palabra = palabra[:-2]       # lesiones, manuales, motores
+            palabra = palabra[:-2]
         elif palabra.endswith("s"):
-            palabra = palabra[:-1]       # cortes, cascos, herramientas
+            palabra = palabra[:-1]
     return palabra[:6]
 
 
@@ -76,11 +61,10 @@ def _a_minutos(horas, minutos, pedagogica=False):
 
 
 def extraer_minutos(texto):
-    """Convierte '1 hora 13 minutos', '2 horas', '45 minutos' o '73' a minutos."""
     if texto is None or (not isinstance(texto, str) and pd.isna(texto)):
         return 0
     t = str(texto).lower().replace(",", ".").strip()
-    if re.fullmatch(r"\d+(\.\d+)?", t):          # ya viene como número de minutos
+    if re.fullmatch(r"\d+(\.\d+)?", t):
         return int(float(t))
     h = re.search(r"(\d+(?:\.\d+)?)\s*(?:horas?|hrs?|h)\b", t)
     m = re.search(r"(\d+)\s*(?:minutos?|mins?|min)\b", t)
@@ -88,8 +72,6 @@ def extraer_minutos(texto):
 
 
 def extraer_minutos_exigidos(texto):
-    """Interpreta la exigencia legal. Devuelve minutos, o None si no es cuantificable
-    (ej: 'Según matriz de riesgo')."""
     if not texto or not str(texto).strip():
         return None
     t = str(texto).lower().replace(",", ".")
@@ -112,8 +94,6 @@ def formatear_duracion(minutos_totales):
 
 
 def limpiar_columnas(df):
-    """Quita espacios en encabezados y aplana saltos de línea (incluidos '\\n' literales)
-    usando '; ' como separador para que Normativa y Competencias sigan legibles."""
     df.columns = [str(c).strip() for c in df.columns]
 
     def aplanar(valor):
@@ -127,11 +107,9 @@ def limpiar_columnas(df):
             df[col] = df[col].apply(aplanar)
     return df
 
-
 # =============================================================================
 # 2. VOCABULARIO: STOPWORDS Y SINÓNIMOS
 # =============================================================================
-# Palabras que no aportan señal por sí solas (gramática + términos SST genéricos).
 STOPWORDS = {
     "el","la","los","las","un","una","unos","unas","de","del","al","y","e","o","u","para","por","con","sin","sobre","entre","hacia","hasta","segun","tras","que","como","uso","frente","ante","donde",
     "manejo","operacion","manipulacion","realizar","aplicar","identificar","reconocer","comprender","entender","prevenir","evitar","conocer","proteger","mantener","asegurar","garantizar","promover","desarrollar","fomentar","implementar","utilizar",
@@ -141,9 +119,6 @@ STOPWORDS = {
     "marco","normativo","competencias","descripcion","speaker","nombre","duracion",
 }
 
-# Grupos de términos equivalentes. Si la palabra clave dice "auditiva" y el curso dice
-# "oídos", son lo mismo. AQUÍ ES DONDE MÁS CONVIENE AGREGAR VOCABULARIO con el tiempo.
-# Una línea = un grupo, palabras sueltas separadas por espacio.
 GRUPOS_SINONIMOS = [
     "auditivo auditiva oido oidos audicion hipoacusia ruido prexor sordera orejera orejeras tapon tapones",
     "ocular oculares ojo ojos vision vista visual lente lentes antiparra antiparras gafas anteojos",
@@ -168,16 +143,6 @@ GRUPOS_SINONIMOS = [
     "corte cortes cortante cortantes laceracion amputacion",
     "hipobaria hipoxia altitud soroche",
     "pausa pausas descanso micropausa estiramiento",
-    "herramienta herramientas maquina maquinas", "fuego incendio incendios extintor extintores combustion",
-    "auxilio auxilios rcp reanimacion desmayo lipotimia",
-    "conduccion conducir conductor conductores vehiculo vehiculos chofer defensivo",
-    "radiacion ultravioleta uv solar fotoproteccion",
-    "alcohol droga drogas",
-    "comite comites cphs paritario paritarios",
-    "atrapamiento atrapar aplastamiento cizallamiento movil moviles",
-    "corte cortes cortante cortantes laceracion amputacion",
-    "hipobaria hipoxia altitud soroche",
-    "pausa pausas descanso micropausa estiramiento",
     "herramienta herramientas maquina maquinas",
     "epp epi proteccion",
 ]
@@ -190,15 +155,12 @@ def _construir_sinonimos(grupos):
             mapa.setdefault(r, set()).update(raices)
     return mapa
 
-
 SINONIMOS = _construir_sinonimos(GRUPOS_SINONIMOS)
-
 
 # =============================================================================
 # 3. MOTOR DE SCORING
 # =============================================================================
 def indexar_catalogo(df):
-    """Pre-calcula las raíces de cada campo de cada curso (se hace una sola vez)."""
     cursos = []
     for _, row in df.iterrows():
         campos, todo = {}, set()
@@ -212,14 +174,11 @@ def indexar_catalogo(df):
 
 
 def preparar_frase(frase, cursos):
-    """Prepara una palabra clave: raíces, tokens significativos con sinónimos y su IDF
-    (una palabra que aparece en media el catálogo vale menos que una rara)."""
     norm = normalizar_texto(frase)
     palabras = norm.split()
     if not palabras:
         return None
     significativas = [w for w in palabras if w not in STOPWORDS and len(w) >= 2]
-    # Una sola palabra genérica ("seguridad", "salud") no sirve como palabra clave.
     if len(palabras) == 1 and not significativas:
         return None
 
@@ -263,7 +222,6 @@ def fuerza_match(fp, lista, conjunto):
 
 
 def puntuar_curso(curso, frases_prep):
-    """Devuelve (puntaje_total, mejor_puntaje_de_una_frase, detalle_de_coincidencias)."""
     total, mejor_frase, detalle = 0.0, 0.0, []
     for fp in frases_prep:
         mejor, campo_mejor = 0.0, ""
@@ -283,18 +241,16 @@ def puntuar_curso(curso, frases_prep):
 
 
 def separar_palabras_clave(texto):
-    """Acepta comas, punto y coma o saltos de línea; ignora la etiqueta 'PALABRAS CLAVE...:'."""
     texto = re.sub(r"(?i)^\s*palabras\s+clave(\s+para\s+programa)?\s*:?\s*", "", texto.strip())
     frases = [f.strip(" .\t\"'•-") for f in re.split(r"[,;\n]+", texto)]
     return [f for f in frases if f]
 
 
 def calcular_ranking(df, frases, tema, norma, umbral, exigir_norma):
-    """Puntúa todo el catálogo y marca qué cursos entran a la ruta."""
     cursos = indexar_catalogo(df)
     consultas = list(frases)
     if tema and tema.strip():
-        consultas.append(tema.strip())          # el Tema/Módulo también cuenta como búsqueda
+        consultas.append(tema.strip())
     frases_prep = [fp for fp in (preparar_frase(f, cursos) for f in consultas) if fp]
 
     res = [puntuar_curso(c, frases_prep) for c in cursos]
@@ -303,7 +259,6 @@ def calcular_ranking(df, frases, tema, norma, umbral, exigir_norma):
     out["_mejor_frase"] = [r[1] for r in res]
     out["Coincidencias"] = [r[2] for r in res]
 
-    # Bonus de orden y filtro opcional por la norma seleccionada
     out["Cita la norma"] = False
     out["_bonus"] = 0.0
     if norma in PATRONES_NORMA:
@@ -317,13 +272,11 @@ def calcular_ranking(df, frases, tema, norma, umbral, exigir_norma):
     out["_entra"] = (out["Score"] >= umbral) & (out["_mejor_frase"] >= PUNTAJE_MIN_UNA_FRASE)
     if exigir_norma and norma in PATRONES_NORMA:
         out["_entra"] &= out["Cita la norma"]
-    # El bonus se suma DESPUÉS de decidir quién entra: solo afecta el orden.
     out["Score"] = out["Score"] + out["_bonus"]
-    return out.sort_values("Score", ascending=False)
+    return out.sort_values("Score", ascending=False).reset_index(drop=True)
 
 
 def evaluar_cumplimiento(total_min, exigida_txt, solo_oal):
-    """Texto de la fila resumen: compara de verdad lo ofrecido contra lo exigido."""
     exigidos = extraer_minutos_exigidos(exigida_txt)
     if exigidos is None:
         texto = "Duración exigida no cuantificable: validar manualmente"
@@ -334,7 +287,6 @@ def evaluar_cumplimiento(total_min, exigida_txt, solo_oal):
     if solo_oal:
         texto += " | Exige OAL: los cursos Bukplay son complementarios"
     return texto
-
 
 # =============================================================================
 # 4. INTERFAZ STREAMLIT
@@ -409,33 +361,67 @@ if archivo_subido is not None:
             frases = separar_palabras_clave(palabras_clave_input)
             if not frases:
                 st.session_state.pop("resultado", None)
+                st.session_state.pop("df_editor_input", None)
                 st.warning("⚠️ Debes ingresar palabras clave.")
             else:
                 ranking = calcular_ranking(
                     df_catalogo, frases, nombre_tema, nombre_norma, umbral, exigir_norma
                 )
+                
+                col_dur_rank = next((c for c in ranking.columns if c.lower().startswith("duraci")), None)
+                dur_col_val = ranking[col_dur_rank] if col_dur_rank else ""
+                
+                # Tabla base para el editor interactivo
+                df_editor_input = pd.DataFrame({
+                    "Incluir": ranking["_entra"],
+                    "Score": ranking["Score"],
+                    "Nombre": ranking.get("Nombre", ""),
+                    "Duración": dur_col_val,
+                    "Normativa": ranking.get("Normativa", ""),
+                    "Coincidencias": ranking["Coincidencias"],
+                })
+
+                st.session_state["df_editor_input"] = df_editor_input
                 st.session_state["resultado"] = {
                     "ranking": ranking,
                     "norma": nombre_norma or "Norma General",
                     "tema": nombre_tema or "Tema General",
                     "exigida": duracion_exigida or "No especificada",
                     "oal": exclusividad.startswith("Exclusivo"),
-                    "n_frases": len(frases),
                 }
 
-        # --- Se muestra desde session_state para que NO desaparezca al descargar ---
-        res = st.session_state.get("resultado")
-        if res:
+        # --- Renderizado con control manual ---
+        if "resultado" in st.session_state and "df_editor_input" in st.session_state:
+            res = st.session_state["resultado"]
             ranking = res["ranking"]
-            df_filtrado = ranking[ranking["_entra"]].copy()
+
+            st.subheader("🛠️ Selección y Ajuste de Cursos")
+            st.caption(
+                "Los cursos con ticket fueron seleccionados automáticamente por el algoritmo. "
+                "Marca o desmarca casillas para agregar o quitar cursos de la ruta final:"
+            )
+
+            edited_df = st.data_editor(
+                st.session_state["df_editor_input"],
+                column_config={
+                    "Incluir": st.column_config.CheckboxColumn("Incluir", help="Marca o desmarca para definir la ruta final"),
+                    "Score": st.column_config.NumberColumn("Score", format="%.2f"),
+                },
+                disabled=["Score", "Nombre", "Duración", "Normativa", "Coincidencias"],
+                use_container_width=True,
+                hide_index=True,
+                key="editor_interactivo_rutas",
+            )
+
+            # Extraer los cursos marcados actualmente
+            indices_seleccionados = edited_df[edited_df["Incluir"]].index
+            df_filtrado = ranking.loc[indices_seleccionados].copy()
+
             if "Nombre" in df_filtrado.columns:
                 df_filtrado = df_filtrado.drop_duplicates(subset=["Nombre"])
 
             if df_filtrado.empty:
-                st.warning(
-                    "⚠️ No se encontraron cursos con ese puntaje. Revisa los 'casi' más abajo "
-                    "o baja el puntaje mínimo en Ajustes avanzados."
-                )
+                st.warning("⚠️ No hay ningún curso seleccionado. Marca al menos una casilla en la tabla.")
             else:
                 col_dur = next((c for c in df_filtrado.columns if c.lower().startswith("duraci")), None)
                 dur_num = (
@@ -466,6 +452,7 @@ if archivo_subido is not None:
                 ]], columns=df_tabla.columns)
                 df_final = pd.concat([df_tabla, fila_vacia, fila_resumen], ignore_index=True)
 
+                st.markdown("---")
                 st.subheader(f"📋 Ruta Generada: {res['norma']} - {res['tema']}")
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Cursos en la ruta", len(df_tabla))
@@ -473,36 +460,15 @@ if archivo_subido is not None:
                 c3.metric("Exigencia", res["exigida"])
                 (st.success if estado.startswith("Cumple") else st.warning)(estado)
 
-                # Vista de auditoría en pantalla (NO se exporta)
-                with st.expander("🔍 Por qué entró cada curso (auditoría)", expanded=True):
-                    vista = df_filtrado[["Nombre", "Score", "Coincidencias"]].copy()
-                    col_cuando = next((c for c in df_filtrado.columns if c.lower().startswith("cuándo")), None)
-                    if col_cuando:
-                        vista["Complemento presencial"] = (
-                            df_filtrado[col_cuando].str.contains("presencial|advertencia", case=False, regex=True)
-                            .map({True: "⚠️ Revisar ficha", False: ""})
-                        )
-                    st.dataframe(vista, use_container_width=True, hide_index=True)
-
                 st.dataframe(df_final, use_container_width=True)
 
                 nombre_clean = re.sub(r"[^\w\-]+", "_", f"{res['norma']}_{res['tema']}").strip("_")
                 st.download_button(
                     label=f"📥 Descargar CSV ({nombre_clean}.csv)",
-                    data=df_final.to_csv(index=False).encode("utf-8-sig"),  # BOM: Excel respeta tildes
+                    data=df_final.to_csv(index=False).encode("utf-8-sig"),
                     file_name=f"{nombre_clean}.csv",
                     mime="text/csv",
                 )
-
-            # Cursos que NO entraron pero tuvieron alguna coincidencia
-            casi = ranking[(~ranking["_entra"]) & (ranking["Score"] > 0)]
-            if not casi.empty:
-                with st.expander(f"🤏 Cursos descartados con alguna coincidencia ({len(casi)})"):
-                    st.caption("Si alguno corresponde, agrega su palabra clave o baja el puntaje mínimo.")
-                    st.dataframe(
-                        casi[["Nombre", "Score", "Coincidencias"]],
-                        use_container_width=True, hide_index=True,
-                    )
 
     except Exception as e:
         st.error(f"Error interno del sistema: {e}")
